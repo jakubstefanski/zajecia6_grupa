@@ -1,3 +1,7 @@
+import json
+import pytest
+from pydantic import ValidationError
+
 from src.models import Bill, Parameters, TenantSettlement, ApartmentSettlement, Transfer
 from src.manager import Manager
 
@@ -85,3 +89,69 @@ def test_apartment_has_any_bills():
 
     has_bills = manager.has_any_bills('apart-polanka', 2025, 3)
     assert has_bills == False
+
+
+def test_blacklist_model_and_default_file_loading():
+    """Verify BlacklistedTenant model validation and default blacklist.json loading."""
+    from src.models import BlacklistedTenant
+
+    entry = BlacklistedTenant(name="Marek Kowalczyk", reason="Nieplacenie czynszu")
+    assert entry.name == "Marek Kowalczyk"
+    assert entry.reason == "Nieplacenie czynszu"
+
+    with pytest.raises(ValidationError):
+        BlacklistedTenant(name="Marek Kowalczyk")
+
+    with pytest.raises(ValidationError):
+        BlacklistedTenant(name=123, reason="Nieplacenie czynszu")
+
+    params = Parameters()
+    assert params.blacklist_json_path == 'data/blacklist.json'
+
+    manager = Manager(params)
+    assert isinstance(manager.blacklist, list)
+    assert len(manager.blacklist) > 0
+    for item in manager.blacklist:
+        assert isinstance(item, BlacklistedTenant)
+        assert isinstance(item.name, str) and len(item.name.strip()) > 0
+        assert isinstance(item.reason, str) and len(item.reason.strip()) > 0
+
+    assert manager.is_tenant_blacklisted(manager.blacklist[0].name) is True
+
+
+def test_blacklist_check_from_custom_file(tmp_path):
+    """Verify loading blacklist from a custom JSON file and checking tenants."""
+    from src.models import BlacklistedTenant
+
+    blacklist_data = [
+        {"name": "Marek Kowalczyk", "reason": "Nieplacenie czynszu"},
+        {"name": "Anna Zielinska", "reason": "Zniszczenie mienia"},
+    ]
+    blacklist_file = tmp_path / "blacklist.json"
+    blacklist_file.write_text(json.dumps(blacklist_data), encoding="utf-8")
+
+    manager = Manager(Parameters(blacklist_json_path=str(blacklist_file)))
+    assert len(manager.blacklist) == 2
+    assert isinstance(manager.blacklist[0], BlacklistedTenant)
+    assert manager.blacklist[0].name == "Marek Kowalczyk"
+    assert manager.blacklist[0].reason == "Nieplacenie czynszu"
+
+    assert manager.is_tenant_blacklisted("Marek Kowalczyk") is True
+    assert manager.is_tenant_blacklisted("Anna Zielinska") is True
+    assert manager.is_tenant_blacklisted("marek kowalczyk") is True
+    assert manager.is_tenant_blacklisted("Jan Nowak") is False
+    assert manager.is_tenant_blacklisted("") is False
+
+
+def test_blacklist_dynamic_updates():
+    """Verify is_tenant_blacklisted reflects updates to manager.blacklist."""
+    from src.models import BlacklistedTenant
+
+    manager = Manager(Parameters())
+    manager.blacklist = []
+    assert manager.is_tenant_blacklisted("Piotr Testowy") is False
+
+    manager.blacklist.append(
+        BlacklistedTenant(name="Piotr Testowy", reason="Zaklocanie ciszy nocnej")
+    )
+    assert manager.is_tenant_blacklisted("Piotr Testowy") is True
