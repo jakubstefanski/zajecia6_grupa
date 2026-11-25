@@ -120,7 +120,10 @@ class Manager:
 
     def is_tenant_blacklisted(self, tenant: Tenant | str) -> bool:
         name = tenant.name if isinstance(tenant, Tenant) else tenant
-        return any(bt.name == name for bt in self.blacklisted_tenants)
-
-    def is_tenant_blacklisted(self, tenant_name: str) -> bool:
-        return any(item.name == tenant_name for item in self.blacklist)
+        normalized_name = name.strip().lower()
+        if not normalized_name:
+            return False
+        return any(
+            item.name.strip().lower() == normalized_name
+            for item in self.blacklist
+        )
